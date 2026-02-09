@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Redutores Cloud System</title>
+    <style>
+        :root { --primary: #0f172a; --accent: #2563eb; --bg: #f8fafc; --text: #334155; }
+        body { font-family: sans-serif; background: var(--bg); color: var(--text); margin: 0; padding-bottom: 80px; }
+        
+        /* Telas */
+        #authScreen, #appScreen { display: none; }
+        .visible { display: block !important; }
+
+        /* Login Styles */
+        .auth-container {
+            height: 100vh; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 20px;
+            background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); color: white;
+        }
+        .auth-box { width: 100%; max-width: 350px; background: rgba(255,255,255,0.1); padding: 30px; border-radius: 16px; backdrop-filter: blur(10px); }
+        .auth-input { width: 100%; padding: 15px; margin-bottom: 15px; border: none; border-radius: 8px; box-sizing: border-box; }
+        .btn-auth { width: 100%; padding: 15px; background: var(--accent); color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; }
+        .toggle-auth { margin-top: 15px; text-align: center; font-size: 0.9rem; cursor: pointer; text-decoration: underline; }
+
+        /* App Styles */
+        header { background: var(--primary); color: white; padding: 15px; display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; z-index: 100; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
+        .card { background: white; margin: 15px; padding: 20px; border-radius: 12px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
+        .card h3 { margin: 0 0 5px 0; color: var(--primary); }
+        .fab { position: fixed; bottom: 20px; right: 20px; background: var(--accent); color: white; width: 60px; height: 60px; border-radius: 50%; display: flex; justify-content: center; align-items: center; font-size: 30px; box-shadow: 0 4px 10px rgba(37, 99, 235, 0.4); cursor: pointer; border: none; }
+        
+        /* Modal */
+        .modal { display: none; position: fixed; top:0; left:0; width:100%; height:100%; background: rgba(0,0,0,0.5); z-index: 200; align-items: flex-end; }
+        .modal-content { background: white; width: 100%; padding: 25px; border-radius: 20px 20px 0 0; box-sizing: border-box; animation: slideUp 0.3s; max-height: 90vh; overflow-y: auto; }
+        @keyframes slideUp { from {transform: translateY(100%);} to {transform: translateY(0);} }
+        
+        input, textarea, select { width: 100%; padding: 12px; margin-bottom: 15px; border: 1px solid #ccc; border-radius: 8px; box-sizing: border-box; }
+        .btn-save { width: 100%; padding: 15px; background: var(--primary); color: white; border: none; border-radius: 8px; font-size: 1rem; }
+        
+        .gallery { display: flex; gap: 10px; overflow-x: auto; margin-top: 10px; }
+        .gallery img { width: 80px; height: 80px; object-fit: cover; border-radius: 8px; border: 1px solid #eee; }
+        .delete-btn { color: red; background: none; border: none; float: right; font-weight: bold; cursor: pointer; }
+    </style>
+</head>
+<body>
+
+<div id="authScreen" class="auth-container visible">
+    <div class="auth-box">
+        <h2 style="text-align:center; margin-top:0;">Redutores Cloud</h2>
+        <input type="email" id="email" class="auth-input" placeholder="Seu E-mail">
+        <input type="password" id="password" class="auth-input" placeholder="Sua Senha">
+        <button class="btn-auth" id="authBtn" onclick="handleLogin()">ENTRAR</button>
+        <div class="toggle-auth" onclick="toggleAuthMode()">Não tem conta? Clique para Cadastrar</div>
+        <p id="authError" style="color: #ff6b6b; text-align: center; font-size: 0.9rem;"></p>
+    </div>
+</div>
+
+<div id="appScreen">
+    <header>
+        <span id="userEmailDisplay">Usuário</span>
+        <button onclick="logout()" style="background:rgba(255,255,255,0.2); border:none; color:white; padding:5px 10px; border-radius:4px;">Sair</button>
+    </header>
+
+    <div id="listaRedutores">
+        <div style="text-align:center; padding:40px; color:#999;">Carregando dados da nuvem...</div>
+    </div>
+
+    <button class="fab" onclick="abrirModal()">+</button>
+</div>
+
+<div id="formModal" class="modal">
+    <div class="modal-content">
+        <h3>Novo Redutor</h3>
+        <label>Cliente</label>
+        <input type="text" id="cliente">
+        <label>Marca/Modelo</label>
+        <input type="text" id="modelo">
+        <label>Descrição</label>
+        <textarea id="descricao" rows="3"></textarea>
+        
+        <label>Fotos</label>
+        <input type="file" id="fotoInput" accept="image/*" multiple onchange="processarFotos(this)">
+        <div id="previewArea" class="gallery"></div>
+        
+        <br><br>
+        <button class="btn-save" id="btnSalvar" onclick="salvarRedutor()">Salvar na Nuvem</button>
+        <button onclick="document.getElementById('formModal').style.display='none'" style="width:100%; padding:15px; background:none; border:none; color:#666; margin-top:10px;">Cancelar</button>
+    </div>
+</div>
+
+<script type="module">
+    // -----------------------------------------------------------
+    // CONFIGURAÇÃO DO FIREBASE
+    // -----------------------------------------------------------
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-app.js";
+    import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, onAuthStateChanged, signOut } 
+    from "https://www.gstatic.com/firebasejs/9.22.0/firebase-auth.js";
+    import { getFirestore, collection, addDoc, query, where, onSnapshot, orderBy, deleteDoc, doc } 
+    from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
+
+    // --- SUBTITUA ABAIXO PELAS SUAS CHAVES DO GOOGLE ---
+    const firebaseConfig = {
+     apiKey: "AIzaSyCzg7wgbvIX3k5kSbxBbVXqMQPi_h0jL3s",
+  authDomain: "redutores-app.firebaseapp.com",
+  databaseURL: "https://redutores-app-default-rtdb.firebaseio.com",
+  projectId: "redutores-app",
+  storageBucket: "redutores-app.firebasestorage.app",
+  messagingSenderId: "240032336273",
+  appId: "1:240032336273:web:aaddfb7587e8c04e603230",
+  measurementId: "G-CXTMH8CW4D"
+    };
+    // -----------------------------------------------------------
+
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+
+    let currentUser = null;
+    let isLoginMode = true;
+    let fotosParaSalvar = [];
+
+    // --- SISTEMA DE AUTENTICAÇÃO ---
+    
+    // Monitorar estado do usuário (Logado ou Não)
+    onAuthStateChanged(auth, (user) => {
+        if (user) {
+            currentUser = user;
+            document.getElementById('authScreen').classList.remove('visible');
+            document.getElementById('appScreen').classList.add('visible');
+            document.getElementById('userEmailDisplay').innerText = user.email;
+            carregarDadosEmTempoReal();
+        } else {
+            currentUser = null;
+            document.getElementById('appScreen').classList.remove('visible');
+            document.getElementById('authScreen').classList.add('visible');
+        }
+    });
+
+    window.handleLogin = async () => {
+        const email = document.getElementById('email').value;
+        const pass = document.getElementById('password').value;
+        const errorMsg = document.getElementById('authError');
+        const btn = document.getElementById('authBtn');
+
+        if(!email || !pass) { errorMsg.innerText = "Preencha tudo."; return; }
+
+        try {
+            btn.innerText = "Aguarde...";
+            if(isLoginMode) {
+                await signInWithEmailAndPassword(auth, email, pass);
+            } else {
+                await createUserWithEmailAndPassword(auth, email, pass);
+            }
+        } catch (error) {
+            console.error(error);
+            let msg = "Erro ao conectar.";
+            if(error.code === 'auth/wrong-password') msg = "Senha incorreta.";
+            if(error.code === 'auth/user-not-found') msg = "Usuário não existe.";
+            if(error.code === 'auth/email-already-in-use') msg = "E-mail já cadastrado.";
+            if(error.code === 'auth/weak-password') msg = "Senha muito fraca (min 6 digitos).";
+            errorMsg.innerText = msg;
+            btn.innerText = isLoginMode ? "ENTRAR" : "CADASTRAR";
+        }
+    };
+
+    window.toggleAuthMode = () => {
+        isLoginMode = !isLoginMode;
+        document.getElementById('authBtn').innerText = isLoginMode ? "ENTRAR" : "CADASTRAR";
+        document.querySelector('.toggle-auth').innerText = isLoginMode ? "Não tem conta? Clique para Cadastrar" : "Já tem conta? Clique para Entrar";
+        document.getElementById('authError').innerText = "";
+    };
+
+    window.logout = () => signOut(auth);
+
+    // --- BANCO DE DADOS (FIRESTORE) ---
+
+    function carregarDadosEmTempoReal() {
+        const listaDiv = document.getElementById('listaRedutores');
+        
+        // Query: Buscar coleção "redutores" onde o campo "uid" é igual ao usuário atual
+        const q = query(
+            collection(db, "redutores"), 
+            where("uid", "==", currentUser.uid),
+            orderBy("data", "desc")
+        );
+
+        // onSnapshot: Fica "ouvindo" o banco. Se você mudar no celular, muda no PC na hora.
+        onSnapshot(q, (snapshot) => {
+            listaDiv.innerHTML = "";
+            if(snapshot.empty) {
+                listaDiv.innerHTML = '<div style="text-align:center; padding:40px; color:#999;">Nenhum redutor encontrado.<br>Clique no + para adicionar.</div>';
+                return;
+            }
+
+            snapshot.forEach((docSnap) => {
+                const data = docSnap.data();
+                const id = docSnap.id;
+                
+                let htmlFotos = '';
+                if(data.fotos) {
+                    htmlFotos = `<div class="gallery">` + 
+                        data.fotos.map(f => `<img src="${f}" onclick="window.open('${f}')">`).join('') + 
+                        `</div>`;
+                }
+
+                const card = document.createElement('div');
+                card.className = 'card';
+                card.innerHTML = `
+                    <button class="delete-btn" onclick="deletarItem('${id}')">Excluir</button>
+                    <h3>${data.cliente}</h3>
+                    <small style="color:#666; font-weight:bold;">${data.modelo}</small>
+                    <p>${data.descricao}</p>
+                    ${htmlFotos}
+                `;
+                listaDiv.appendChild(card);
+            });
+        });
+    }
+
+    window.salvarRedutor = async () => {
+        const btn = document.getElementById('btnSalvar');
+        const cliente = document.getElementById('cliente').value;
+        const modelo = document.getElementById('modelo').value;
+        const descricao = document.getElementById('descricao').value;
+
+        if(!cliente || !modelo) return alert("Preencha cliente e modelo.");
+
+        btn.innerText = "Enviando...";
+        btn.disabled = true;
+
+        try {
+            // Salvar no Firestore
+            await addDoc(collection(db, "redutores"), {
+                uid: currentUser.uid, // Importante: Salva o ID do dono para só ele ver
+                cliente: cliente,
+                modelo: modelo,
+                descricao: descricao,
+                fotos: fotosParaSalvar, // Base64 array
+                data: Date.now()
+            });
+
+            document.getElementById('formModal').style.display = 'none';
+            // Limpar form
+            document.getElementById('cliente').value = '';
+            document.getElementById('modelo').value = '';
+            document.getElementById('descricao').value = '';
+            document.getElementById('previewArea').innerHTML = '';
+            fotosParaSalvar = [];
+        } catch (e) {
+            alert("Erro ao salvar: " + e.message);
+        } finally {
+            btn.innerText = "Salvar na Nuvem";
+            btn.disabled = false;
+        }
+    };
+
+    window.deletarItem = async (id) => {
+        if(confirm("Tem certeza? Isso apagará de todos os dispositivos.")) {
+            await deleteDoc(doc(db, "redutores", id));
+        }
+    };
+
+    // --- UTILITÁRIOS ---
+
+    window.abrirModal = () => {
+        document.getElementById('formModal').style.display = 'flex';
+        fotosParaSalvar = [];
+        document.getElementById('previewArea').innerHTML = '';
+    }
+
+    window.processarFotos = (input) => {
+        if (!input.files) return;
+        Array.from(input.files).forEach(file => {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                // Redimensionar para economizar espaço no banco (Max 600px)
+                const img = new Image();
+                img.src = e.target.result;
+                img.onload = () => {
+                    const canvas = document.createElement('canvas');
+                    const ctx = canvas.getContext('2d');
+                    const maxWidth = 600; 
+                    const scale = maxWidth / img.width;
+                    canvas.width = maxWidth;
+                    canvas.height = img.height * scale;
+                    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                    
+                    // Comprimir JPEG 0.6
+                    const dataUrl = canvas.toDataURL('image/jpeg', 0.6);
+                    fotosParaSalvar.push(dataUrl);
+
+                    // Preview
+                    const imgPrev = document.createElement('img');
+                    imgPrev.src = dataUrl;
+                    document.getElementById('previewArea').appendChild(imgPrev);
+                }
+            };
+            reader.readAsDataURL(file);
+        });
+    }
+
+</script>
+</body>
+</html>
